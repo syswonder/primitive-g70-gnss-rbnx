@@ -85,12 +85,3 @@ ACTIVE 表示接口接通，不表示定位有效、NTRIP 鉴权成功或已有 
 消费者需按 CONTRACTS.md 检查接收超时、数据龄期和定位质量。
 本包不提供地图定位、融合、导航或 MCP 工具。
 
-## 验证
-
-- python3 -m unittest discover -s tests -v：参数映射、密码传递与临时文件清理。
-- scripts/smoke.py：独立 Atlas 上验证已有话题模式、端点、生命周期及重复启动保护。
-- scripts/simulate.py：在仅本机 FastDDS domain 217 中用伪串口和本地 NTRIP
-  测试服务器验证包内驱动、实际账号/密码/挂载点请求及生命周期。
-  不访问真实串口或外部差分账号，模拟数据不会进入机器人的 ROS 域。
-
-后两项请在配置好 ROS 2、robonix-api 和本包 PYTHONPATH 的系统 Python 中运行。
