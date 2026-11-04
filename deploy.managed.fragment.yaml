@@ -1,0 +1,18 @@
+# Example only: do not run alongside the existing G70/WebUI-managed driver.
+# Set G70_NTRIP_PASSWORD in the environment inherited by rbnx before boot.
+primitive:
+  - name: g70_gnss
+    path: /home/syswonder/xiangruicheng/primitive-g70-gnss-rbnx
+    config:
+      manage_driver: true
+      sentinel_timeout_s: 15.0
+      serial:
+        port: auto  # Or the stable /dev/serial/by-id/... path on this host.
+        baud: 115200
+      frame_id: gnss_link
+      ntrip:
+        server_ip: 192.0.2.1  # Replace with actual NTRIP caster IP/hostname.
+        port: 2101
+        username: YOUR_ACCOUNT
+        mountpoint: YOUR_MOUNTPOINT
+        password_env: G70_NTRIP_PASSWORD

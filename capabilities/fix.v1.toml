@@ -1,0 +1,9 @@
+[contract]
+id = "robonix/primitive/gnss/fix"
+version = "1"
+kind = "primitive"
+idl = "common_interfaces/sensor_msgs/msg/NavSatFix.msg"
+description = "GNSS antenna position in WGS 84; altitude above the ellipsoid in metres. Preserve NavSatFix status, covariance and timestamp; RTK quality is provided separately."
+
+[mode]
+type = "topic_out"

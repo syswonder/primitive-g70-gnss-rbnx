@@ -1,0 +1,7 @@
+# Merge this entry into the existing deployment's primitive list.
+primitive:
+  - name: g70_gnss
+    path: /home/syswonder/xiangruicheng/primitive-g70-gnss-rbnx
+    config:
+      manage_driver: false
+      sentinel_timeout_s: 10.0

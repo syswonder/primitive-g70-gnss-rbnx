@@ -1,0 +1,16 @@
+manifestVersion: 1
+package:
+  name: robonix.primitive.g70.gnss
+  version: 0.1.0
+  description: Portable G70 GNSS hardware primitive with optional NTRIP corrections.
+  license: MulanPSL-2.0
+  tags: [primitive, gnss, gps, rtk, g70]
+build: bash scripts/build.sh
+start: bash scripts/start.sh
+capabilities:
+  - name: robonix/primitive/gnss/fix
+    transport: ros2
+    path: capabilities/fix.v1.toml
+  - name: robonix/primitive/gnss/rtk_status
+    transport: ros2
+    path: capabilities/rtk_status.v1.toml
