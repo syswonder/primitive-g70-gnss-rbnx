@@ -9,6 +9,7 @@ from std_msgs.msg import String,Bool
 from .protocol import gga,checked_nmea,MeasurementCache
 from geometry_msgs.msg import TwistStamped
 from .ntrip import NtripWorker
+from .ubx import PvtDecoder
 
 def load_config(path):
     path=Path(path).resolve();cfg=yaml.safe_load(path.read_text())
@@ -48,6 +49,8 @@ class G70(Node):
         self.dev=None;self.lock=threading.Lock();self.buffer=bytearray()
         self.last=None;self.last_time=None;self.latest_gga=None;self.utc=None;self.last_measurement=None
         self.measurements=MeasurementCache();self.fix_stamp=None
+        self.ubx=PvtDecoder();self.pvt=None;self.pvt_at=None
+        self.ubx_mode=self.cfg.get("receiver_protocol","nmea")=="ubx_nav_pvt"
         self.velocity_pub=self.create_publisher(TwistStamped,'/gps/velocity',10)
         self.bad_nmea=0;self.serial_state='DISCONNECTED';self.serial_error='';self.next_open=0.
         self.fix_pub=self.create_publisher(NavSatFix,'/gps/fix',10)
@@ -77,6 +80,7 @@ class G70(Node):
             self.dev=None;self.latest_gga=None;self.last_time=None;self.last=None
             self.last_measurement=None;self.utc=None
         self.measurements=MeasurementCache();self.fix_stamp=None
+        self.ubx=PvtDecoder();self.pvt=None;self.pvt_at=None
         self.buffer.clear();self.serial_state='DISCONNECTED';self.serial_error=type(error).__name__+': '+str(error)
         self.next_open=time.monotonic()+3
     def write_rtcm(self,frame):
@@ -101,6 +105,8 @@ class G70(Node):
             with self.lock:
                 if self.dev is None:return
                 data=self.dev.read(min(self.dev.in_waiting,16384))
+            if self.ubx_mode:
+                for sample in self.ubx.feed(data):self.publish_pvt(sample)
             self.buffer.extend(data)
             while b'\n' in self.buffer:
                 line,_,remaining=self.buffer.partition(b'\n');self.buffer=bytearray(remaining)
@@ -112,6 +118,7 @@ class G70(Node):
                 except (ValueError,UnicodeError,OverflowError):
                     self.bad_nmea+=1;continue
                 self.raw_pub.publish(String(data=line.decode('ascii')))
+                if self.ubx_mode and parsed is None:continue
                 try:
                     kind=self.measurements.feed(line,time.monotonic(),self.get_clock().now().to_msg())
                 except ValueError:
@@ -128,12 +135,22 @@ class G70(Node):
                 with self.lock:
                     now=time.monotonic()
                     if parsed['utc_time']!=self.utc:
-                        self.last_measurement=now;self.fix_stamp=self.get_clock().now().to_msg()
+                        self.last_measurement=now
+                        if not self.ubx_mode:self.fix_stamp=self.get_clock().now().to_msg()
                     self.utc=parsed['utc_time'];self.last_time=now;self.last=parsed
                     self.latest_gga=line+b'\r\n'
-                self.publish_fix(parsed)
+                if not self.ubx_mode:self.publish_fix(parsed)
             if len(self.buffer)>8192:self.buffer.clear()
         except (OSError,serial.SerialException) as e:self.disconnect(e)
+    def publish_pvt(self,sample):
+        from std_msgs.msg import Header
+        self.pvt=sample;self.pvt_at=time.monotonic();self.fix_stamp=self.get_clock().now().to_msg()
+        sigma={'longitude_sigma_m':sample['hacc_m'],'latitude_sigma_m':sample['hacc_m'],'altitude_sigma_m':sample['vacc_m']}
+        self.fix_pub.publish(fix_message(sample,Header(stamp=self.fix_stamp,frame_id=self.frame),sigma))
+        velocity=TwistStamped();velocity.header.stamp=self.fix_stamp;velocity.header.frame_id='gnss_enu'
+        velocity.twist.linear.x=sample['east_mps'];velocity.twist.linear.y=sample['north_mps']
+        self.velocity_pub.publish(velocity)
+
     def publish_fix(self,data):
         from std_msgs.msg import Header
         sigma=self.measurements.position_sigma(data['utc_time'],time.monotonic(),self.stale) if data else None
@@ -159,6 +176,22 @@ class G70(Node):
         if data:
             result.update(satellites=data['satellites'],hdop=data['hdop'],
                 differential_age_s=data['differential_age_s'],utc_time=data['utc_time'])
+        if self.ubx_mode:
+            age=None if self.pvt_at is None else now-self.pvt_at
+            fresh=bool(self.dev is not None and age is not None and 0<=age<self.stale)
+            pvt=self.pvt
+            quality=pvt['quality'] if pvt else 0
+            stamp=None if self.fix_stamp is None else self.fix_stamp.sec+self.fix_stamp.nanosec/1e9
+            result.update(state=pvt['state'] if fresh and pvt else 'STALE' if pvt else 'NO_DATA',
+                receiver_quality=quality,rtk_fixed=bool(fresh and quality==4),fix_age_s=age,
+                measurement_age_s=age,fix_stamp_s=stamp,
+                measurement_id=pvt['tow_ms'] if pvt else None,epoch_source='UBX_iTOW_ms',
+                position_covariance_source='UBX_NAV_PVT',
+                velocity={'fresh':fresh,'age_s':age,'stamp_s':stamp,'source':'UBX_NAV_PVT',
+                    'reference_frame':'ENU','measurement_id':pvt['tow_ms'] if pvt else None,
+                    'accuracy_mps':pvt['speed_accuracy_mps'] if pvt else None,'accuracy_source':'UBX_NAV_PVT',
+                    'covariance_known':False})
+            fixed=result['rtk_fixed']
         self.fixed_pub.publish(Bool(data=fixed))
         self.rtk_pub.publish(String(data=json.dumps(result,allow_nan=False)))
         if not fresh:self.publish_fix(None)

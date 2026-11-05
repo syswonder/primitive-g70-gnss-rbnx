@@ -9,13 +9,15 @@ import yaml
 
 
 def validate_config(cfg):
-    unknown = set(cfg) - {"sentinel_timeout_s", "manage_driver", "driver_config", "serial", "frame_id", "fix_timeout", "ntrip", "require_velocity"}
+    unknown = set(cfg) - {"sentinel_timeout_s", "manage_driver", "driver_config", "serial", "frame_id", "fix_timeout", "ntrip", "require_velocity", "receiver_protocol"}
     if unknown:
         raise ValueError(f"Unknown config keys: {sorted(unknown)}")
     if not isinstance(cfg.get("manage_driver", True), bool):
         raise ValueError("manage_driver must be a boolean")
     if type(cfg.get("require_velocity", False)) is not bool:
         raise ValueError("require_velocity must be boolean")
+    if cfg.get("receiver_protocol", "nmea") not in ("nmea", "ubx_nav_pvt"):
+        raise ValueError("receiver_protocol must be nmea or ubx_nav_pvt")
     ntrip = cfg.get("ntrip", {})
     if not isinstance(ntrip, dict):
         raise ValueError("ntrip must be an object")
@@ -73,7 +75,7 @@ def prepare_config(cfg):
     ntrip = data["ntrip"]
     data["serial"].update(cfg.get("serial", {}))
     data["serial"]["port"] = serial_port(data["serial"].get("port", "auto"))
-    for key in ("frame_id", "fix_timeout"):
+    for key in ("frame_id", "fix_timeout", "receiver_protocol"):
         if key in cfg:
             data[key] = cfg[key]
     overrides = cfg.get("ntrip", {})
