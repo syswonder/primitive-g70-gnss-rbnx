@@ -2,7 +2,7 @@
 
 可独立启动 G70 硬件及可选 NTRIP 差分的 Robonix 原语。包内携带 G70 串口/NMEA/RTCM
 驱动，不依赖 ranger 原 GNSS 工程目录，也不依赖特定本体的 Soma/URDF 申报。
-话题固定为 /gps/fix 和 /gps/rtk_status；新增能力约定见 [CONTRACTS.md](CONTRACTS.md)。
+位置/状态话题为 /gps/fix 和 /gps/rtk_status；本轮新增可选 /gps/velocity（RMC 地速）；新增能力约定见 [CONTRACTS.md](CONTRACTS.md)。
 
 ## 环境与构建
 
@@ -85,3 +85,9 @@ ACTIVE 表示接口接通，不表示定位有效、NTRIP 鉴权成功或已有 
 消费者需按 CONTRACTS.md 检查接收超时、数据龄期和定位质量。
 本包不提供地图定位、融合、导航或 MCP 工具。
 
+
+定位 service 对接时可设置 `require_velocity: true`，并使用新增 `/gps/velocity` 能力。
+RMC 解析接收机报告地速，GST 解析位置标准差；仅消费设备已有输出，不自动下发接收机设置。
+没有 RMC/GST 或测量精度尚未验证时，上层不得假装已具备原方案全部定位反馈。详细时间戳、未知精度与单位语义见 CONTRACTS.md。
+
+当前验证用框架仍采用命名空间 Driver；`package_manifest.namespace-driver.yaml` 提供兼容选择，主 manifest 保持原共享生命周期声明方式。部署只能选择一种，不并列声明两种 Driver。

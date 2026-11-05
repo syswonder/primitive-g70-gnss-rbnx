@@ -1,0 +1,9 @@
+[contract]
+id = "robonix/primitive/gnss/velocity"
+version = "1"
+kind = "primitive"
+idl = "common_interfaces/geometry_msgs/msg/TwistStamped.msg"
+description = "Receiver-reported horizontal ENU ground velocity from NMEA RMC, covariance unavailable"
+
+[mode]
+type = "topic_out"

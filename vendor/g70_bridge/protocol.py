@@ -92,3 +92,68 @@ class ChunkDecoder:
             if self.buffer[self.size:self.size+2]!=b'\r\n':raise ValueError('chunk terminator')
             out.extend(self.buffer[:self.size]);del self.buffer[:self.size+2];self.size=None
         return bytes(out)
+
+
+def utc_seconds(value):
+    if not isinstance(value,str) or len(value)<6 or not value[:6].isdigit():
+        raise ValueError('Invalid measurement UTC')
+    h,m,s=int(value[:2]),int(value[2:4]),float(value[4:])
+    if not (0<=h<24 and 0<=m<60 and math.isfinite(s) and 0<=s<61):
+        raise ValueError('Invalid measurement UTC')
+    return h*3600+m*60+s
+
+
+def rmc(line):
+    """Receiver-reported true-track ground velocity; not a claim of Doppler provenance."""
+    f=checked_nmea(line)
+    if f[0][-3:]!='RMC':return None
+    if len(f)<10:raise ValueError('Short RMC')
+    epoch=utc_seconds(f[1])
+    if f[2]!='A' or (len(f)>12 and f[12]=='N'):return {'valid':False,'utc_time':f[1]}
+    speed=float(f[7])*1852/3600
+    course=float(f[8]) if f[8] else None
+    if not math.isfinite(speed) or speed<0 or (course is not None and (not math.isfinite(course) or not 0<=course<360)):
+        raise ValueError('Invalid RMC velocity')
+    if course is None and speed!=0:raise ValueError('Moving RMC needs true track')
+    angle=math.radians(course or 0.)
+    return {'valid':True,'utc_time':f[1],'epoch_s':epoch,'east_mps':speed*math.sin(angle),
+            'north_mps':speed*math.cos(angle),'source':'NMEA_RMC','covariance_known':False}
+
+
+def gst(line):
+    """Receiver-estimated position sigmas in metres, never a fabricated HDOP conversion."""
+    f=checked_nmea(line)
+    if f[0][-3:]!='GST':return None
+    if len(f)<9:raise ValueError('Short GST')
+    epoch=utc_seconds(f[1]);lat,lon,alt=map(float,f[6:9])
+    if any(not math.isfinite(v) or v<=0 for v in (lat,lon,alt)):raise ValueError('Invalid GST sigma')
+    return {'utc_time':f[1],'epoch_s':epoch,'latitude_sigma_m':lat,'longitude_sigma_m':lon,'altitude_sigma_m':alt}
+
+
+class MeasurementCache:
+    def __init__(self):
+        self.velocity=None;self.velocity_at=None;self.velocity_stamp=None
+        self.sigma=None;self.sigma_at=None
+    def feed(self,line,now,stamp):
+        velocity=rmc(line)
+        if velocity is not None:
+            if not velocity['valid']:
+                self.velocity=None;self.velocity_at=None;return 'invalid_velocity'
+            if self.velocity is None or velocity['epoch_s']!=self.velocity['epoch_s']:
+                self.velocity=velocity;self.velocity_at=now;self.velocity_stamp=stamp;return 'velocity'
+            return None  # Replayed RMC is not a fresh measurement.
+        sigma=gst(line)
+        if sigma is not None:
+            self.sigma=sigma;self.sigma_at=now;return 'sigma'
+        return None
+    def position_sigma(self,utc,now,timeout):
+        if (self.sigma and self.sigma_at is not None and 0<=now-self.sigma_at<timeout
+                and self.sigma['epoch_s']==utc_seconds(utc)):
+            return self.sigma
+        return None
+    def velocity_status(self,now,timeout):
+        age=None if self.velocity_at is None else now-self.velocity_at
+        return {'fresh':age is not None and 0<=age<timeout,'age_s':age,
+                'utc_time':self.velocity['utc_time'] if self.velocity else None,
+                'source':'NMEA_RMC','reference_frame':'ENU','covariance_known':False,
+                'stamp_s':self.velocity_stamp.sec+self.velocity_stamp.nanosec/1e9 if hasattr(self.velocity_stamp,'sec') else None}

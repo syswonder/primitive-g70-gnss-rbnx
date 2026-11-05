@@ -14,3 +14,6 @@ capabilities:
   - name: robonix/primitive/gnss/rtk_status
     transport: ros2
     path: capabilities/rtk_status.v1.toml
+  - name: robonix/primitive/gnss/velocity
+    transport: ros2
+    path: capabilities/velocity.v1.toml

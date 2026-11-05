@@ -15,4 +15,4 @@ elif [[ -z "${AMENT_PREFIX_PATH:-}" ]]; then
 fi
 set -u
 export PYTHONPATH="$(rbnx path robonix-api):$PKG:${PYTHONPATH:-}"
-exec /usr/bin/python3 -u -m g70_gnss.atlas_bridge
+exec "${G70_PYTHON:-/usr/bin/python3}" -u -m g70_gnss.atlas_bridge

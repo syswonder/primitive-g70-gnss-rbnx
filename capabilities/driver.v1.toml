@@ -1,0 +1,9 @@
+[contract]
+id = "robonix/primitive/gnss/driver"
+version = "1"
+kind = "primitive"
+idl = "lifecycle/srv/Driver.srv"
+description = "Explicit lifecycle compatibility with namespace-driver SDK"
+
+[mode]
+type = "rpc"

@@ -6,7 +6,8 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix,NavSatStatus
 from std_msgs.msg import String,Bool
-from .protocol import gga,checked_nmea
+from .protocol import gga,checked_nmea,MeasurementCache
+from geometry_msgs.msg import TwistStamped
 from .ntrip import NtripWorker
 
 def load_config(path):
@@ -20,7 +21,7 @@ def load_config(path):
     if secret=='' and not n.get('allow_empty_password',False):secret=None
     return cfg,secret
 
-def fix_message(data,header):
+def fix_message(data,header,sigma=None):
     msg=NavSatFix();msg.header=header
     valid=data is not None and data['valid']
     msg.status.status=(NavSatStatus.STATUS_GBAS_FIX if data['quality'] in (2,4,5) else NavSatStatus.STATUS_FIX) if valid else NavSatStatus.STATUS_NO_FIX
@@ -30,6 +31,11 @@ def fix_message(data,header):
     msg.longitude=data['longitude'] if valid else math.nan
     msg.altitude=data['altitude_ellipsoid'] if valid else math.nan
     msg.position_covariance_type=NavSatFix.COVARIANCE_TYPE_UNKNOWN
+    if valid and sigma:
+        msg.position_covariance[0]=sigma['longitude_sigma_m']**2
+        msg.position_covariance[4]=sigma['latitude_sigma_m']**2
+        msg.position_covariance[8]=sigma['altitude_sigma_m']**2
+        msg.position_covariance_type=NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
     return msg
 
 class G70(Node):
@@ -41,6 +47,8 @@ class G70(Node):
         self.stale=float(self.cfg.get('fix_timeout',3.0))
         self.dev=None;self.lock=threading.Lock();self.buffer=bytearray()
         self.last=None;self.last_time=None;self.latest_gga=None;self.utc=None;self.last_measurement=None
+        self.measurements=MeasurementCache();self.fix_stamp=None
+        self.velocity_pub=self.create_publisher(TwistStamped,'/gps/velocity',10)
         self.bad_nmea=0;self.serial_state='DISCONNECTED';self.serial_error='';self.next_open=0.
         self.fix_pub=self.create_publisher(NavSatFix,'/gps/fix',10)
         self.rtk_pub=self.create_publisher(String,'/gps/rtk_status',10)
@@ -68,6 +76,7 @@ class G70(Node):
                 except OSError:pass
             self.dev=None;self.latest_gga=None;self.last_time=None;self.last=None
             self.last_measurement=None;self.utc=None
+        self.measurements=MeasurementCache();self.fix_stamp=None
         self.buffer.clear();self.serial_state='DISCONNECTED';self.serial_error=type(error).__name__+': '+str(error)
         self.next_open=time.monotonic()+3
     def write_rtcm(self,frame):
@@ -103,10 +112,23 @@ class G70(Node):
                 except (ValueError,UnicodeError,OverflowError):
                     self.bad_nmea+=1;continue
                 self.raw_pub.publish(String(data=line.decode('ascii')))
-                if parsed is None:continue
+                try:
+                    kind=self.measurements.feed(line,time.monotonic(),self.get_clock().now().to_msg())
+                except ValueError:
+                    self.bad_nmea+=1;continue
+                if kind=='velocity':
+                    v=self.measurements.velocity;msg=TwistStamped()
+                    msg.header.stamp=self.measurements.velocity_stamp;msg.header.frame_id='gnss_enu'
+                    msg.twist.linear.x=v['east_mps'];msg.twist.linear.y=v['north_mps']
+                    self.velocity_pub.publish(msg)
+                if parsed is None:
+                    if kind=='sigma' and self.last and self.fix_stamp is not None:
+                        self.publish_fix(self.last)
+                    continue
                 with self.lock:
                     now=time.monotonic()
-                    if parsed['utc_time']!=self.utc:self.last_measurement=now
+                    if parsed['utc_time']!=self.utc:
+                        self.last_measurement=now;self.fix_stamp=self.get_clock().now().to_msg()
                     self.utc=parsed['utc_time'];self.last_time=now;self.last=parsed
                     self.latest_gga=line+b'\r\n'
                 self.publish_fix(parsed)
@@ -114,7 +136,8 @@ class G70(Node):
         except (OSError,serial.SerialException) as e:self.disconnect(e)
     def publish_fix(self,data):
         from std_msgs.msg import Header
-        self.fix_pub.publish(fix_message(data,Header(stamp=self.get_clock().now().to_msg(),frame_id=self.frame)))
+        sigma=self.measurements.position_sigma(data['utc_time'],time.monotonic(),self.stale) if data else None
+        self.fix_pub.publish(fix_message(data,Header(stamp=self.fix_stamp if data and self.fix_stamp is not None else self.get_clock().now().to_msg(),frame_id=self.frame),sigma))
     def publish_status(self):
         now=time.monotonic()
         with self.lock:
@@ -129,8 +152,10 @@ class G70(Node):
         correction['corrections_fresh']=bool(rt is not None and now-rt<self.cfg['ntrip'].get('stream_timeout',15))
         result=dict(state=(data['state'] if fresh else 'STALE' if data else 'NO_DATA'),
             receiver_quality=data['quality'] if data else None,rtk_fixed=fixed,
+            fix_stamp_s=self.fix_stamp.sec+self.fix_stamp.nanosec/1e9 if self.fix_stamp is not None else None,
             fix_age_s=age,measurement_age_s=measurement_age,serial_state=self.serial_state,
-            serial_error=self.serial_error,bad_nmea=self.bad_nmea,ntrip=correction)
+            serial_error=self.serial_error,bad_nmea=self.bad_nmea,ntrip=correction,
+            velocity=self.measurements.velocity_status(now,self.stale),position_covariance_source='NMEA_GST' if data and self.measurements.position_sigma(data['utc_time'],now,self.stale) else 'UNKNOWN')
         if data:
             result.update(satellites=data['satellites'],hdop=data['hdop'],
                 differential_age_s=data['differential_age_s'],utc_time=data['utc_time'])

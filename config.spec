@@ -19,3 +19,5 @@
 # Without credentials NTRIP is disabled and ordinary GNSS remains available.
 # Credentials require server_ip/username/mountpoint.
 # Topics fixed to /gps/fix and /gps/rtk_status.
+# require_velocity: bool, default false. When true ACTIVATE also waits for finite ENU /gps/velocity.
+# RMC and GST are consumed only if already emitted by the receiver; no device setup writes.

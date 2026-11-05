@@ -47,6 +47,7 @@ def activate():
     from rclpy.executors import SingleThreadedExecutor
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import NavSatFix
+    from geometry_msgs.msg import TwistStamped
     from std_msgs.msg import String
 
     # A private context avoids interfering with the provider's ROS runtime.
@@ -84,18 +85,23 @@ def activate():
             if node.count_publishers("/gps/fix") or node.count_publishers("/gps/rtk_status"):
                 return Err("An external GNSS publisher already exists; stop it before using manage_driver=true")
             driver.start(config)
+        node.create_subscription(TwistStamped, '/gps/velocity',
+            lambda msg: seen.add('/gps/velocity') if msg.header.frame_id=='gnss_enu' and all(math.isfinite(v) for v in (msg.twist.linear.x,msg.twist.linear.y)) else None, qos_profile_sensor_data)
+        required={'/gps/fix','/gps/rtk_status'} | ({'/gps/velocity'} if config.get('require_velocity',False) else set())
         deadline = time.monotonic() + timeout_s
-        while len(seen) < 2 and time.monotonic() < deadline:
+        while not required.issubset(seen) and time.monotonic() < deadline:
             if driver.process is not None and driver.process.poll() is not None:
                 return Err("Managed G70 driver exited; see rbnx-build/data/driver.log")
             executor.spin_once(timeout_sec=min(0.1, max(0, deadline - time.monotonic())))
-        if len(seen) < 2:
-            missing = sorted({"/gps/fix", "/gps/rtk_status"} - seen)
+        if not required.issubset(seen):
+            missing = sorted(required - seen)
             return Err(f"No correctly typed GNSS sample / RTK JSON on {missing}; "
                        "start the external G70 driver and check ROS_DOMAIN_ID / RMW")
         if not declared:
             gnss.declare_ros2_topic("robonix/primitive/gnss/fix", "/gps/fix", qos="reliable")
             gnss.declare_ros2_topic("robonix/primitive/gnss/rtk_status", "/gps/rtk_status", qos="reliable")
+            if "/gps/velocity" in seen:
+                gnss.declare_ros2_topic("robonix/primitive/gnss/velocity", "/gps/velocity", qos="reliable")
             declared = True
         ready = True
     finally:

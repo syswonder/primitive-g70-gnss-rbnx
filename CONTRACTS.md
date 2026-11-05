@@ -50,3 +50,11 @@ RTK JSON 的龄期也须检查。STALE、NO_DATA、NO_FIX、未知状态或无�
 RTK 状态目前依赖 G70 JSON；成为跨厂商标准前应协商结构化 RTK 消息、
 状态枚举、时间戳及缺失值表达，再新增统一约定版本和设备适配。
 本包不修改框架源码或全局能力目录。
+
+## 本地扩展：接收机地速与位置协方差
+
+新增 `robonix/primitive/gnss/velocity`，ROS2 `geometry_msgs/TwistStamped`，端点 `/gps/velocity`。
+frame `gnss_enu`，linear.x=东速、linear.y=北速（m/s）。来源为校验后的 RMC 地速/真航迹；不声称必为多普勒、不估算位置差、不读取控制指令。
+RMC 相同 UTC 的重复数据不刷新测量时间，不提供虚假的速度精度。RTK JSON 新增 `velocity`：source、fresh、age_s、utc_time、stamp_s、reference_frame、covariance_known=false；同时新增 `fix_stamp_s` 以关联两个标准 ROS 消息。
+同 UTC 的 GST 提供 latitude/longitude/altitude sigma（m），转换为 NavSatFix 对角协方差；保留对应 GGA 的原 header，不把 GST 后到当成新定位。没有有效 GST 时仍标 UNKNOWN，不从 HDOP 猜精度。
+`require_velocity=true` 使激活探测同时要求速度流，用于定位服务；默认 false 保留仅位置的旧用途。必须使用含该扩展的原语版本；实机是否已有 RMC/GST 输出尚未验证，不自动修改接收机配置。

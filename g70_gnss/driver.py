@@ -9,11 +9,13 @@ import yaml
 
 
 def validate_config(cfg):
-    unknown = set(cfg) - {"sentinel_timeout_s", "manage_driver", "driver_config", "serial", "frame_id", "fix_timeout", "ntrip"}
+    unknown = set(cfg) - {"sentinel_timeout_s", "manage_driver", "driver_config", "serial", "frame_id", "fix_timeout", "ntrip", "require_velocity"}
     if unknown:
         raise ValueError(f"Unknown config keys: {sorted(unknown)}")
     if not isinstance(cfg.get("manage_driver", True), bool):
         raise ValueError("manage_driver must be a boolean")
+    if type(cfg.get("require_velocity", False)) is not bool:
+        raise ValueError("require_velocity must be boolean")
     ntrip = cfg.get("ntrip", {})
     if not isinstance(ntrip, dict):
         raise ValueError("ntrip must be an object")
